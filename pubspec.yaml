@@ -1,4 +1,4 @@
-name: to_do_list
+name: todolist
 description: "A simple Flutter To-Do List MVP."
 publish_to: 'none'
 
@@ -17,6 +17,13 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
 
 flutter:
   uses-material-design: true

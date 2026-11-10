@@ -58,7 +58,7 @@ class ToDoListApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'To Do List - App',
+      title: 'To Do List',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -68,13 +68,7 @@ class ToDoListApp extends StatelessWidget {
           primary: kBlue,
           surface: Colors.white,
         ),
-        fontFamily: 'Roboto',
-        appBarTheme: const AppBarTheme(
-          backgroundColor: kInk,
-          foregroundColor: Colors.white,
-          centerTitle: true,
-          elevation: 0,
-        ),
+        fontFamily: 'Manrope',
         dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
@@ -186,7 +180,7 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Mark task as complete'),
-        content: Text('Tandai "${task.title}" sebagai tugas selesai?'),
+        content: Text('Mark "${task.title}" as complete?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -251,20 +245,20 @@ class _HomePageState extends State<HomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'To Do List - App',
+                'To Do List App',
                 style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
               const Text(
-                'Atur aktivitas harianmu dengan lebih mudah.',
+                'Make your daily activity count.',
                 style: TextStyle(color: kMuted),
               ),
               const SizedBox(height: 18),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.info_outline),
-                title: const Text('Tentang aplikasi'),
-                subtitle: const Text('Versi MVP 1.0'),
+                title: const Text('About App'),
+                subtitle: const Text('App Version 1.0'),
                 onTap: () => Navigator.pop(context),
               ),
             ],
@@ -295,17 +289,6 @@ class _HomePageState extends State<HomePage> {
     final tasks = _sortedTasks;
 
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Menu',
-          onPressed: _showMenu,
-          icon: const Icon(Icons.menu_rounded, size: 29),
-        ),
-        title: const Text(
-          'To Do List - App',
-          style: TextStyle(fontSize: 21, fontWeight: FontWeight.w500),
-        ),
-      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openTaskForm(),
         backgroundColor: kBlue,
@@ -340,27 +323,37 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildGreeting() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(19, 18, 19, 18),
+      padding: const EdgeInsets.fromLTRB(19, 16, 12, 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
+        border: Border.all(color: kInk, width: 1.0),
       ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'Hello, User',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: kInk,
-            ),
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Hello, User',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: kInk,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Ready for today activity?',
+                style: TextStyle(fontSize: 13, color: kMuted),
+              ),
+            ],
           ),
-          SizedBox(height: 4),
-          Text(
-            'Ready for today activity?',
-            style: TextStyle(fontSize: 13, color: kMuted),
+          IconButton(
+            tooltip: 'Menu',
+            onPressed: _showMenu,
+            icon: const Icon(Icons.menu_rounded, size: 28, color: kInk),
           ),
         ],
       ),
@@ -373,45 +366,48 @@ class _HomePageState extends State<HomePage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
+        border: Border.all(color: kInk, width: 1.0),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Today Activity',
+            'Your Progress',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 13),
-          Row(
-            children: [
-              Expanded(
-                child: _statCard(
-                  title: 'Total Task',
-                  count: _tasks.length,
-                  large: true,
-                  color: const Color(0xFFF7F6FA),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _statCard(
+                    title: 'Total Task',
+                    count: _tasks.length,
+                    large: true,
+                    color: Colors.white,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  children: [
-                    _statCard(
-                      title: 'On Progress',
-                      count: _progressCount,
-                      color: const Color(0xFFE9E8EC),
-                    ),
-                    const SizedBox(height: 7),
-                    _statCard(
-                      title: 'Complete',
-                      count: _completedCount,
-                      color: kLime,
-                    ),
-                  ],
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _statCard(
+                        title: 'On Progress',
+                        count: _progressCount,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(height: 7),
+                      _statCard(
+                        title: 'Complete',
+                        count: _completedCount,
+                        color: Colors.white,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -426,25 +422,33 @@ class _HomePageState extends State<HomePage> {
   }) {
     return Container(
       width: double.infinity,
-      constraints: BoxConstraints(minHeight: large ? 91 : 43),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kInk.withValues(alpha: 0.65), width: 0.8),
+        border: Border.all(color: kInk, width: 1.0),
       ),
       child: large
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(title, style: const TextStyle(fontSize: 11)),
-                const SizedBox(height: 15),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: kInk,
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Text(
                   '$count',
                   style: const TextStyle(
                     fontSize: 34,
                     height: 1,
                     fontWeight: FontWeight.w800,
+                    color: kInk,
                   ),
                 ),
               ],
@@ -457,12 +461,13 @@ class _HomePageState extends State<HomePage> {
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
+                    color: kInk,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '$count ${count == 1 ? 'Task' : 'Task'}',
-                  style: const TextStyle(fontSize: 10),
+                  '$count Task',
+                  style: const TextStyle(fontSize: 10, color: kInk),
                 ),
               ],
             ),
@@ -508,7 +513,7 @@ class _HomePageState extends State<HomePage> {
       ),
       backgroundColor: Colors.white,
       selectedColor: kInk,
-      side: BorderSide(color: selected ? kInk : const Color(0xFFB9B8BF)),
+      side: const BorderSide(color: kInk, width: 1.0),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       shape: const StadiumBorder(),
     );
@@ -540,7 +545,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 5),
             const Text(
-              'Tekan tombol + untuk membuat tugas baru.',
+              'Click + button to add new task.',
               style: TextStyle(color: kMuted, fontSize: 12),
             ),
           ],
@@ -564,10 +569,14 @@ class _HomePageState extends State<HomePage> {
     for (final entry in groups.entries) {
       widgets.add(
         Padding(
-          padding: const EdgeInsets.only(bottom: 9, top: 2),
+          padding: const EdgeInsets.only(bottom: 9, top: 12),
           child: Text(
             _dateHeading(entry.key),
-            style: const TextStyle(fontSize: 12, color: kMuted),
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: kInk,
+            ),
           ),
         ),
       );
@@ -587,7 +596,7 @@ class _HomePageState extends State<HomePage> {
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kInk.withValues(alpha: 0.72), width: 0.8),
+        border: Border.all(color: kInk, width: 1.0),
       ),
       child: Column(
         children: [
@@ -663,27 +672,35 @@ class _HomePageState extends State<HomePage> {
           if (expanded) ...[
             Divider(height: 1, color: kInk.withValues(alpha: 0.18)),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Wrap(
-                spacing: 7,
-                runSpacing: 7,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _actionButton(
-                    label: 'Edit Task',
-                    icon: Icons.edit_outlined,
-                    onPressed: () => _openTaskForm(task: task),
-                  ),
                   if (!task.isComplete)
-                    _actionButton(
-                      label: 'Mark as complete',
-                      icon: Icons.check_circle_outline,
-                      primary: true,
-                      onPressed: () => _confirmComplete(task),
-                    ),
+                    Row(
+                      children: [
+                        _actionButton(
+                          label: 'Edit Task',
+                          icon: Icons.edit_outlined,
+                          onPressed: () => _openTaskForm(task: task),
+                        ),
+                        const SizedBox(width: 6),
+                        _actionButton(
+                          label: 'Mark as complete',
+                          icon: Icons.check_circle_outline,
+                          primary: true,
+                          onPressed: () => _confirmComplete(task),
+                        ),
+                      ],
+                    )
+                  else
+                    const SizedBox.shrink(),
+
                   _actionButton(
                     label: 'Delete',
                     icon: Icons.delete_outline,
-                    danger: true,
+                    danger: !task.isComplete,
+                    dark: task.isComplete,
                     onPressed: () => _confirmDelete(task),
                   ),
                 ],
@@ -701,25 +718,37 @@ class _HomePageState extends State<HomePage> {
     required VoidCallback onPressed,
     bool primary = false,
     bool danger = false,
+    bool dark = false,
   }) {
+    Color fgColor = kInk;
+    Color bgColor = Colors.white;
+    Color borderColor = kInk;
+
+    if (dark) {
+      fgColor = Colors.white;
+      bgColor = kInk;
+      borderColor = kInk;
+    } else if (primary) {
+      fgColor = Colors.white;
+      bgColor = kBlue;
+      borderColor = kBlue;
+    } else if (danger) {
+      fgColor = const Color(0xFFD7473D);
+      bgColor = Colors.white;
+      borderColor = const Color(0xFFD7473D);
+    }
+
     return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 10)),
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+      ),
       style: OutlinedButton.styleFrom(
-        foregroundColor: primary
-            ? Colors.white
-            : danger
-                ? const Color(0xFFD7473D)
-                : kInk,
-        backgroundColor: primary ? kBlue : Colors.white,
-        side: BorderSide(
-          color: primary
-              ? kBlue
-              : danger
-                  ? const Color(0xFFD7473D)
-                  : const Color(0xFFB9B8BF),
-        ),
+        foregroundColor: fgColor,
+        backgroundColor: bgColor,
+        side: BorderSide(color: borderColor, width: 1.0),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         visualDensity: VisualDensity.compact,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -942,7 +971,7 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                     onPressed: () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: kInk,
-                      side: const BorderSide(color: Color(0xFFB9B8BF)),
+                      side: const BorderSide(color: kInk),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 17,
                         vertical: 13,
