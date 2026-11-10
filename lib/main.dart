@@ -15,8 +15,6 @@ const Color kPaper = Color(0xFFF7F6FA);
 const Color kMuted = Color(0xFF777780);
 const String kStorageKey = 'todo_tasks_v1';
 
-enum TaskFilter { all, inProgress, complete }
-
 class TodoTask {
   TodoTask({
     required this.id,
@@ -58,7 +56,7 @@ class ToDoListApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'To Do List - App',
+      title: 'To Do List',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -69,12 +67,6 @@ class ToDoListApp extends StatelessWidget {
           surface: Colors.white,
         ),
         fontFamily: 'Roboto',
-        appBarTheme: const AppBarTheme(
-          backgroundColor: kInk,
-          foregroundColor: Colors.white,
-          centerTitle: true,
-          elevation: 0,
-        ),
         dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
@@ -96,7 +88,6 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final List<TodoTask> _tasks = [];
-  TaskFilter _filter = TaskFilter.all;
   String? _expandedTaskId;
   bool _isLoading = true;
 
@@ -117,7 +108,7 @@ class _HomePageState extends State<HomePage> {
           TodoTask.fromJson(jsonDecode(raw) as Map<String, dynamic>),
         );
       } catch (_) {
-        // Abaikan data yang tidak dapat dibaca agar aplikasi tetap terbuka.
+        // Abaikan data corrupt agar aplikasi tetap berjalan
       }
     }
 
@@ -137,17 +128,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   List<TodoTask> get _sortedTasks {
-    final result = _tasks.where((task) {
-      switch (_filter) {
-        case TaskFilter.all:
-          return true;
-        case TaskFilter.inProgress:
-          return !task.isComplete;
-        case TaskFilter.complete:
-          return task.isComplete;
-      }
-    }).toList();
-
+    final result = List<TodoTask>.from(_tasks);
     result.sort((a, b) {
       if (a.isComplete != b.isComplete) {
         return a.isComplete ? 1 : -1;
@@ -156,9 +137,6 @@ class _HomePageState extends State<HomePage> {
     });
     return result;
   }
-
-  int get _completedCount => _tasks.where((task) => task.isComplete).length;
-  int get _progressCount => _tasks.length - _completedCount;
 
   Future<void> _openTaskForm({TodoTask? task}) async {
     final result = await showDialog<TodoTask>(
@@ -186,7 +164,7 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Mark task as complete'),
-        content: Text('Tandai "${task.title}" sebagai tugas selesai?'),
+        content: Text('Mark "${task.title}" task as complete?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -238,42 +216,6 @@ class _HomePageState extends State<HomePage> {
     await _saveTasks();
   }
 
-  void _showMenu() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: Colors.white,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'To Do List - App',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Atur aktivitas harianmu dengan lebih mudah.',
-                style: TextStyle(color: kMuted),
-              ),
-              const SizedBox(height: 18),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Tentang aplikasi'),
-                subtitle: const Text('Versi MVP 1.0'),
-                onTap: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   String _dateHeading(DateTime date) {
     const months = [
       'January', 'February', 'March', 'April', 'May', 'June',
@@ -283,7 +225,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _timeText(DateTime date) {
-    final hour = date.hour.toString().padLeft(2, '0');
     final minute = date.minute.toString().padLeft(2, '0');
     final period = date.hour >= 12 ? 'PM' : 'AM';
     final displayHour = date.hour % 12 == 0 ? 12 : date.hour % 12;
@@ -295,17 +236,6 @@ class _HomePageState extends State<HomePage> {
     final tasks = _sortedTasks;
 
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Menu',
-          onPressed: _showMenu,
-          icon: const Icon(Icons.menu_rounded, size: 29),
-        ),
-        title: const Text(
-          'To Do List - App',
-          style: TextStyle(fontSize: 21, fontWeight: FontWeight.w500),
-        ),
-      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openTaskForm(),
         backgroundColor: kBlue,
@@ -317,222 +247,34 @@ class _HomePageState extends State<HomePage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 22, 18, 100),
-                children: [
-                  _buildGreeting(),
-                  const SizedBox(height: 22),
-                  _buildActivity(),
-                  const SizedBox(height: 25),
-                  _buildTaskHeader(),
-                  const SizedBox(height: 12),
-                  _buildFilters(),
-                  const SizedBox(height: 17),
-                  if (tasks.isEmpty)
-                    _buildEmptyState()
-                  else
-                    ..._buildTaskGroups(tasks),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildGreeting() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(19, 18, 19, 18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Hello, User',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: kInk,
-            ),
-          ),
-          SizedBox(height: 4),
-          Text(
-            'Ready for today activity?',
-            style: TextStyle(fontSize: 13, color: kMuted),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivity() {
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Today Activity',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 13),
-          Row(
-            children: [
-              Expanded(
-                child: _statCard(
-                  title: 'Total Task',
-                  count: _tasks.length,
-                  large: true,
-                  color: const Color(0xFFF7F6FA),
-                ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  children: [
-                    _statCard(
-                      title: 'On Progress',
-                      count: _progressCount,
-                      color: const Color(0xFFE9E8EC),
+              child: tasks.isEmpty
+                  ? _buildEmptyState()
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(18, 18, 18, 100),
+                      children: [ const Text('Your Tasks',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                        const SizedBox(height: 12,),
+                        ..._buildTaskGroups(tasks),
+                        ],
                     ),
-                    const SizedBox(height: 7),
-                    _statCard(
-                      title: 'Complete',
-                      count: _completedCount,
-                      color: kLime,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statCard({
-    required String title,
-    required int count,
-    required Color color,
-    bool large = false,
-  }) {
-    return Container(
-      width: double.infinity,
-      constraints: BoxConstraints(minHeight: large ? 91 : 43),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kInk.withValues(alpha: 0.65), width: 0.8),
-      ),
-      child: large
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 11)),
-                const SizedBox(height: 15),
-                Text(
-                  '$count',
-                  style: const TextStyle(
-                    fontSize: 34,
-                    height: 1,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$count ${count == 1 ? 'Task' : 'Task'}',
-                  style: const TextStyle(fontSize: 10),
-                ),
-              ],
             ),
-    );
-  }
-
-  Widget _buildTaskHeader() {
-    return const Text(
-      'Tasks',
-      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-    );
-  }
-
-  Widget _buildFilters() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _filterChip('All', TaskFilter.all),
-          const SizedBox(width: 7),
-          _filterChip('On Progress', TaskFilter.inProgress),
-          const SizedBox(width: 7),
-          _filterChip('Complete', TaskFilter.complete),
-        ],
-      ),
-    );
-  }
-
-  Widget _filterChip(String label, TaskFilter filter) {
-    final selected = _filter == filter;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => setState(() {
-        _filter = filter;
-        _expandedTaskId = null;
-      }),
-      showCheckmark: false,
-      labelStyle: TextStyle(
-        fontSize: 12,
-        color: selected ? Colors.white : kInk,
-        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-      ),
-      backgroundColor: Colors.white,
-      selectedColor: kInk,
-      side: BorderSide(color: selected ? kInk : const Color(0xFFB9B8BF)),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      shape: const StadiumBorder(),
     );
   }
 
   Widget _buildEmptyState() {
-    String message = 'You have no task yet';
-    if (_filter == TaskFilter.inProgress && _tasks.isNotEmpty) {
-      message = 'No task in progress';
-    } else if (_filter == TaskFilter.complete && _tasks.isNotEmpty) {
-      message = 'No completed task yet';
-    }
-
     return Padding(
       padding: const EdgeInsets.only(top: 105, bottom: 80),
       child: Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.task_alt_rounded, size: 43, color: Colors.grey.shade400),
             const SizedBox(height: 12),
-            Text(
-              message,
+            const Text(
+              'You have no task yet',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: kMuted,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
@@ -540,7 +282,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 5),
             const Text(
-              'Tekan tombol + untuk membuat tugas baru.',
+              'Click + button to add new task.',
               style: TextStyle(color: kMuted, fontSize: 12),
             ),
           ],
