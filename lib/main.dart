@@ -1,6 +1,4 @@
 import 'dart:convert';
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,9 +12,8 @@ const Color kBlue = Color(0xFF315BEE);
 const Color kLime = Color(0xFFB7F34A);
 const Color kPaper = Color(0xFFF7F6FA);
 const Color kMuted = Color(0xFF777780);
-const String kStorageKey = 'todo_tasks_v1';
-
-enum TaskFilter { all, inProgress, complete }
+const Color kCardBg = Color(0xFFE5E5E7);
+const String kStorageKey = 'todo_tasks';
 
 class TodoTask {
   TodoTask({
@@ -34,20 +31,23 @@ class TodoTask {
   bool isComplete;
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'description': description,
-        'deadline': deadline.toIso8601String(),
-        'isComplete': isComplete,
-      };
+    'id': id,
+    'title': title,
+    'description': description,
+    'deadline': deadline.toIso8601String(),
+    'isComplete': isComplete,
+  };
 
   factory TodoTask.fromJson(Map<String, dynamic> json) {
+    DateTime parsedDeadline = DateTime.now();
+    if (json['deadline'] != null) {
+      parsedDeadline = DateTime.tryParse(json['deadline'].toString()) ?? DateTime.now();
+    }
     return TodoTask(
       id: json['id'] as String,
       title: json['title'] as String? ?? '',
       description: json['description'] as String? ?? '',
-      deadline: DateTime.tryParse(json['deadline'] as String? ?? '') ??
-          DateTime.now(),
+      deadline: parsedDeadline,
       isComplete: json['isComplete'] as bool? ?? false,
     );
   }
@@ -59,11 +59,11 @@ class ToDoListApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'To Do List - App',
+      title: 'To Do List',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: kPaper,
+        scaffoldBackgroundColor: Colors.white,
         colorScheme: ColorScheme.fromSeed(
           seedColor: kBlue,
           primary: kBlue,
@@ -71,16 +71,9 @@ class ToDoListApp extends StatelessWidget {
         ),
         fontFamily: 'Roboto',
         appBarTheme: const AppBarTheme(
-          backgroundColor: kInk,
-          foregroundColor: Colors.white,
-          centerTitle: true,
-          elevation: 0,
-        ),
-        dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
+          foregroundColor: kInk,
+          elevation: 0,
         ),
       ),
       home: const HomePage(),
@@ -97,10 +90,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final List<TodoTask> _tasks = [];
-  TaskFilter _filter = TaskFilter.all;
-  String? _expandedTaskId;
   bool _isLoading = true;
-  final Map<String, Timer> _activeTimers = {};
+  String? _expandedTaskId;
 
   @override
   void initState() {
@@ -115,11 +106,9 @@ class _HomePageState extends State<HomePage> {
 
     for (final raw in rawTasks) {
       try {
-        loaded.add(
-          TodoTask.fromJson(jsonDecode(raw) as Map<String, dynamic>),
-        );
+        loaded.add(TodoTask.fromJson(jsonDecode(raw) as Map<String, dynamic>));
       } catch (_) {
-        // Abaikan data yang tidak dapat dibaca agar aplikasi tetap terbuka.
+
       }
     }
 
@@ -130,66 +119,16 @@ class _HomePageState extends State<HomePage> {
         ..addAll(loaded);
       _isLoading = false;
     });
-
-    for (final task in _tasks) {
-      _scheduleForegroundReminder(task);
-    }
   }
 
+  /// Menyimpan task kembali ke SharedPreferences
   Future<void> _saveTasks() async {
     final prefs = await SharedPreferences.getInstance();
     final rawTasks = _tasks.map((task) => jsonEncode(task.toJson())).toList();
     await prefs.setStringList(kStorageKey, rawTasks);
   }
 
-  void _scheduleForegroundReminder(TodoTask task) {
-    _activeTimers[task.id]?.cancel();
-
-    if (task.isComplete) return;
-
-    final reminderTime = task.deadline.subtract(const Duration(hours: 1)); //modif timernya disini
-    final delay = reminderTime.difference(DateTime.now());
-
-    if (delay.isNegative) return;
-
-    _activeTimers[task.id] = Timer(delay, () {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Reminder: "${task.title}" tenggat dalam 1 jam!'),
-          backgroundColor: kBlue,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      _activeTimers.remove(task.id);
-    });
-  }
-  List<TodoTask> get _sortedTasks {
-    final result = _tasks.where((task) {
-      switch (_filter) {
-        case TaskFilter.all:
-          return true;
-        case TaskFilter.inProgress:
-          return !task.isComplete;
-        case TaskFilter.complete:
-          return task.isComplete;
-      }
-    }).toList();
-
-    result.sort((a, b) {
-      if (a.isComplete != b.isComplete) {
-        return a.isComplete ? 1 : -1;
-      }
-      return a.deadline.compareTo(b.deadline);
-    });
-    return result;
-  }
-
-  int get _completedCount => _tasks.where((task) => task.isComplete).length;
-  int get _progressCount => _tasks.length - _completedCount;
-
+  /// CREATE & EDIT
   Future<void> _openTaskForm({TodoTask? task}) async {
     final result = await showDialog<TodoTask>(
       context: context,
@@ -206,565 +145,412 @@ class _HomePageState extends State<HomePage> {
         final index = _tasks.indexWhere((item) => item.id == task.id);
         if (index != -1) _tasks[index] = result;
       }
-      _expandedTaskId = null;
     });
     await _saveTasks();
-    _scheduleForegroundReminder(result);
   }
 
-  Future<void> _confirmComplete(TodoTask task) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Mark task as complete'),
-        content: Text('Tandai "${task.title}" sebagai tugas selesai?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
+  /// Update
+  Future<void> _toggleTaskComplete(TodoTask task) async {
     setState(() {
-      task.isComplete = true;
-      _expandedTaskId = null;
+      if (_expandedTaskId == task.id) _expandedTaskId = null;
+      task.isComplete = !task.isComplete;
     });
-    //cancel timer ketika task complete
-    _activeTimers[task.id]?.cancel();
-    _activeTimers.remove(task.id);
     await _saveTasks();
   }
 
-  Future<void> _confirmDelete(TodoTask task) async {
+  /// Delete
+  Future<void> _deleteTask(TodoTask task) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Discard Task'),
-        content: Text('Do you want to delete "${task.title}"?'),
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Task'),
+        content: Text('Apakah Anda yakin ingin menghapus task "${task.title}"?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFE34D43),
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
 
-    if (confirmed != true || !mounted) return;
-    setState(() {
-      _tasks.removeWhere((item) => item.id == task.id);
-      _expandedTaskId = null;
-    });
-    //cancel timer ketika task dihapus
-    _activeTimers[task.id]?.cancel();
-    _activeTimers.remove(task.id);
-    await _saveTasks();
+    if (confirmed == true) {
+      setState(() {
+        if (_expandedTaskId == task.id) _expandedTaskId = null;
+        _tasks.removeWhere((item) => item.id == task.id);
+      });
+      await _saveTasks();
+    }
   }
 
-  void _showMenu() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: Colors.white,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'To Do List - App',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Atur aktivitas harianmu dengan lebih mudah.',
-                style: TextStyle(color: kMuted),
-              ),
-              const SizedBox(height: 18),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Tentang aplikasi'),
-                subtitle: const Text('Versi MVP 1.0'),
-                onTap: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _dateHeading(DateTime date) {
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    return '${date.day} ${months[date.month - 1]} ${date.year}';
-  }
-
-  String _timeText(DateTime date) {
-    final hour = date.hour.toString().padLeft(2, '0');
-    final minute = date.minute.toString().padLeft(2, '0');
-    final period = date.hour >= 12 ? 'PM' : 'AM';
-    final displayHour = date.hour % 12 == 0 ? 12 : date.hour % 12;
-    return '${displayHour.toString().padLeft(2, '0')}:$minute $period';
+  String _formatDeadlineCard(DateTime dt) {
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year;
+    final hour = dt.hour.toString().padLeft(2, '0');
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year\n$hour:$minute';
   }
 
   @override
   Widget build(BuildContext context) {
-    final tasks = _sortedTasks;
+    final activeTasks = _tasks.where((t) => !t.isComplete).toList();
+    final completedTasks = _tasks.where((t) => t.isComplete).toList();
 
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Menu',
-          onPressed: _showMenu,
-          icon: const Icon(Icons.menu_rounded, size: 29),
-        ),
         title: const Text(
-          'To Do List - App',
-          style: TextStyle(fontSize: 21, fontWeight: FontWeight.w500),
+          'Tasks',
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w800,
+            color: kInk,
+          ),
         ),
+        centerTitle: false,
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openTaskForm(),
-        backgroundColor: kBlue,
-        foregroundColor: Colors.white,
-        elevation: 3,
+        backgroundColor: kMuted.withValues(alpha: 0.8),
+        elevation: 0,
         shape: const CircleBorder(),
-        child: const Icon(Icons.add, size: 31),
+        child: const Icon(Icons.add, size: 36, color: Colors.white),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 22, 18, 100),
-                children: [
-                  _buildGreeting(),
-                  const SizedBox(height: 22),
-                  _buildActivity(),
-                  const SizedBox(height: 25),
-                  _buildTaskHeader(),
-                  const SizedBox(height: 12),
-                  _buildFilters(),
-                  const SizedBox(height: 17),
-                  if (tasks.isEmpty)
-                    _buildEmptyState()
-                  else
-                    ..._buildTaskGroups(tasks),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildGreeting() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(19, 18, 19, 18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Hello, User',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: kInk,
-            ),
-          ),
-          SizedBox(height: 4),
-          Text(
-            'Ready for today activity?',
-            style: TextStyle(fontSize: 13, color: kMuted),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivity() {
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Today Activity',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 13),
-          Row(
-            children: [
-              Expanded(
-                child: _statCard(
-                  title: 'Total Task',
-                  count: _tasks.length,
-                  large: true,
-                  color: const Color(0xFFF7F6FA),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 100),
+          children: [
+            // ACTIVE TASKS SECTION
+            if (activeTasks.isEmpty && completedTasks.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 80),
+                child: Center(
+                  child: Text(
+                    'Belum ada task, klik + untuk menambahkan',
+                    style: TextStyle(color: kMuted, fontSize: 16),
+                  ),
                 ),
               ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
+
+            for (final task in activeTasks) ...[
+              _buildActiveTaskCard(task),
+              const SizedBox(height: 16),
+            ],
+
+            // DIVIDER BETWEEN ACTIVE & COMPLETED TASKS
+            if (completedTasks.isNotEmpty) ...[
+              if (activeTasks.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Row(
                   children: [
-                    _statCard(
-                      title: 'On Progress',
-                      count: _progressCount,
-                      color: const Color(0xFFE9E8EC),
+                    const Expanded(child: Divider(color: Color(0xFFD8D7DD), thickness: 1)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'Completed (${completedTasks.length})',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: kMuted,
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 7),
-                    _statCard(
-                      title: 'Complete',
-                      count: _completedCount,
-                      color: kLime,
-                    ),
+                    const Expanded(child: Divider(color: Color(0xFFD8D7DD), thickness: 1)),
                   ],
                 ),
-              ),
+                const SizedBox(height: 18),
+              ],
+
+              // COMPLETED TASKS SECTION
+              for (final task in completedTasks) ...[
+                _buildCompletedTaskCard(task),
+                const SizedBox(height: 12),
+              ],
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statCard({
-    required String title,
-    required int count,
-    required Color color,
-    bool large = false,
-  }) {
-    return Container(
-      width: double.infinity,
-      constraints: BoxConstraints(minHeight: large ? 91 : 43),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kInk.withValues(alpha: 0.65), width: 0.8),
-      ),
-      child: large
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 11)),
-                const SizedBox(height: 15),
-                Text(
-                  '$count',
-                  style: const TextStyle(
-                    fontSize: 34,
-                    height: 1,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$count ${count == 1 ? 'Task' : 'Task'}',
-                  style: const TextStyle(fontSize: 10),
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildTaskHeader() {
-    return const Text(
-      'Tasks',
-      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-    );
-  }
-
-  Widget _buildFilters() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _filterChip('All', TaskFilter.all),
-          const SizedBox(width: 7),
-          _filterChip('On Progress', TaskFilter.inProgress),
-          const SizedBox(width: 7),
-          _filterChip('Complete', TaskFilter.complete),
-        ],
-      ),
-    );
-  }
-
-  Widget _filterChip(String label, TaskFilter filter) {
-    final selected = _filter == filter;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => setState(() {
-        _filter = filter;
-        _expandedTaskId = null;
-      }),
-      showCheckmark: false,
-      labelStyle: TextStyle(
-        fontSize: 12,
-        color: selected ? Colors.white : kInk,
-        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-      ),
-      backgroundColor: Colors.white,
-      selectedColor: kInk,
-      side: BorderSide(color: selected ? kInk : const Color(0xFFB9B8BF)),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      shape: const StadiumBorder(),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    String message = 'You have no task yet';
-    if (_filter == TaskFilter.inProgress && _tasks.isNotEmpty) {
-      message = 'No task in progress';
-    } else if (_filter == TaskFilter.complete && _tasks.isNotEmpty) {
-      message = 'No completed task yet';
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 105, bottom: 80),
-      child: Center(
-        child: Column(
-          children: [
-            Icon(Icons.task_alt_rounded, size: 43, color: Colors.grey.shade400),
-            const SizedBox(height: 12),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: kMuted,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 5),
-            const Text(
-              'Tekan tombol + untuk membuat tugas baru.',
-              style: TextStyle(color: kMuted, fontSize: 12),
-            ),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _buildTaskGroups(List<TodoTask> tasks) {
-    final groups = <DateTime, List<TodoTask>>{};
-    for (final task in tasks) {
-      final day = DateTime(
-        task.deadline.year,
-        task.deadline.month,
-        task.deadline.day,
-      );
-      groups.putIfAbsent(day, () => []).add(task);
-    }
+  /// Widget untuk task yang belum selesai
+  Widget _buildActiveTaskCard(TodoTask task) {
+    final isExpanded = _expandedTaskId == task.id;
 
-    final widgets = <Widget>[];
-    for (final entry in groups.entries) {
-      widgets.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 9, top: 2),
-          child: Text(
-            _dateHeading(entry.key),
-            style: const TextStyle(fontSize: 12, color: kMuted),
-          ),
-        ),
-      );
-      for (final task in entry.value) {
-        widgets.add(_buildTaskCard(task));
-        widgets.add(const SizedBox(height: 10));
-      }
-    }
-    return widgets;
-  }
-
-  Widget _buildTaskCard(TodoTask task) {
-    final expanded = _expandedTaskId == task.id;
-    final background = task.isComplete ? kLime : Colors.white;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kInk.withValues(alpha: 0.72), width: 0.8),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => setState(() {
-              _expandedTaskId = expanded ? null : task.id;
-            }),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 13),
+    return Column(
+      children: [
+        // Task Card Body (Tap to expand/collapse action buttons)
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _expandedTaskId = isExpanded ? null : task.id;
+            });
+          },
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(minHeight: 80),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: kCardBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IntrinsicHeight(
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  // Deadline / Time Text
                   SizedBox(
-                    width: 68,
+                    width: 80,
                     child: Text(
-                      _timeText(task.deadline),
-                      style: const TextStyle(fontSize: 11),
+                      _formatDeadlineCard(task.deadline),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: kInk,
+                      ),
                     ),
                   ),
+                  // Vertical Divider Line
                   Container(
-                    width: 1,
-                    height: task.description.isEmpty ? 33 : 49,
-                    color: kInk.withValues(alpha: 0.28),
-                    margin: const EdgeInsets.only(right: 12),
+                    width: 1.5,
+                    color: kInk.withValues(alpha: 0.25),
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
                   ),
+                  // Title and Description
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           task.title,
-                          style: TextStyle(
-                            fontSize: 13,
+                          style: const TextStyle(
+                            fontSize: 14,
                             fontWeight: FontWeight.w800,
-                            decoration: task.isComplete
-                                ? TextDecoration.lineThrough
-                                : null,
+                            color: kInk,
                           ),
                         ),
                         if (task.description.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(
                             task.description,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11, height: 1.3),
-                          ),
-                        ],
-                        if (task.isComplete) ...[
-                          const SizedBox(height: 5),
-                          const Text(
-                            'COMPLETED',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.7,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: kInk,
                             ),
                           ),
                         ],
                       ],
                     ),
                   ),
-                  const SizedBox(width: 5),
-                  Icon(
-                    expanded ? Icons.keyboard_arrow_up : Icons.more_horiz,
-                    size: 20,
+                  // Tombol tandai selesai
+                  IconButton(
+                    icon: const Icon(Icons.check_rounded, size: 24, color: kMuted),
+                    onPressed: () => _toggleTaskComplete(task),
+                    tooltip: 'Mark as complete',
                   ),
                 ],
               ),
             ),
           ),
-          if (expanded) ...[
-            Divider(height: 1, color: kInk.withValues(alpha: 0.18)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                children: [
-                  _actionButton(
-                    label: 'Edit Task',
-                    icon: Icons.edit_outlined,
+        ),
+
+        // Action Buttons Row (Edit Task & Delete Task) - Only shown after tapping task
+        if (isExpanded) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 44,
+                  child: FilledButton(
                     onPressed: () => _openTaskForm(task: task),
-                  ),
-                  if (!task.isComplete)
-                    _actionButton(
-                      label: 'Mark as complete',
-                      icon: Icons.check_circle_outline,
-                      primary: true,
-                      onPressed: () => _confirmComplete(task),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: kCardBg,
+                      foregroundColor: kInk,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
                     ),
-                  _actionButton(
-                    label: 'Delete',
-                    icon: Icons.delete_outline,
-                    danger: true,
-                    onPressed: () => _confirmDelete(task),
+                    child: const Text(
+                      'Edit Task',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 44,
+                  child: FilledButton(
+                    onPressed: () => _deleteTask(task),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red.shade50,
+                      foregroundColor: Colors.redAccent,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                    ),
+                    child: const Text(
+                      'Delete Task',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Widget Untuk Task Selesai
+  Widget _buildCompletedTaskCard(TodoTask task) {
+    final isExpanded = _expandedTaskId == task.id;
+
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _expandedTaskId = isExpanded ? null : task.id;
+            });
+          },
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(minHeight: 80),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: kLime,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Deadline / Time Text
+                  SizedBox(
+                    width: 80,
+                    child: Text(
+                      _formatDeadlineCard(task.deadline),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: kInk,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: 1.5,
+                    color: kInk.withValues(alpha: 0.25),
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          task.title,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: kInk,
+                          ),
+                        ),
+                        if (task.description.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            task.description,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: kInk,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  // Checkmark Icon & Toggle back action
+                  IconButton(
+                    icon: const Icon(Icons.check_circle_rounded, color: kInk, size: 24),
+                    onPressed: () => _toggleTaskComplete(task),
+                    tooltip: 'Mark uncomplete',
                   ),
                 ],
               ),
             ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _actionButton({
-    required String label,
-    required IconData icon,
-    required VoidCallback onPressed,
-    bool primary = false,
-    bool danger = false,
-  }) {
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 10)),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: primary
-            ? Colors.white
-            : danger
-                ? const Color(0xFFD7473D)
-                : kInk,
-        backgroundColor: primary ? kBlue : Colors.white,
-        side: BorderSide(
-          color: primary
-              ? kBlue
-              : danger
-                  ? const Color(0xFFD7473D)
-                  : const Color(0xFFB9B8BF),
+          ),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        visualDensity: VisualDensity.compact,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
+
+        // Action Buttons Row for Completed Task (Edit Task & Delete Task)
+        if (isExpanded) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 44,
+                  child: FilledButton(
+                    onPressed: () => _openTaskForm(task: task),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: kLime,
+                      foregroundColor: kInk,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                    ),
+                    child: const Text(
+                      'Edit Task',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 44,
+                  child: FilledButton(
+                    onPressed: () => _deleteTask(task),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red.shade50,
+                      foregroundColor: Colors.redAccent,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                    ),
+                    child: const Text(
+                      'Delete Task',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
 
+/// form untuk buat & edit task
 class TaskFormDialog extends StatefulWidget {
   const TaskFormDialog({super.key, this.task});
 
@@ -778,8 +564,7 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
   late final TextEditingController _descriptionController;
-  late DateTime _deadline;
-  bool _isSaving = false;
+  late DateTime _selectedDeadline;
 
   bool get _isEditing => widget.task != null;
 
@@ -788,9 +573,8 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
     super.initState();
     final task = widget.task;
     _titleController = TextEditingController(text: task?.title ?? '');
-    _descriptionController =
-        TextEditingController(text: task?.description ?? '');
-    _deadline = task?.deadline ?? DateTime.now().add(const Duration(hours: 1));
+    _descriptionController = TextEditingController(text: task?.description ?? '');
+    _selectedDeadline = task?.deadline ?? DateTime.now();
   }
 
   @override
@@ -800,195 +584,137 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
     super.dispose();
   }
 
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
+  Future<void> _pickDateTime() async {
+    final pickedDate = await showDatePicker(
       context: context,
-      initialDate: _deadline,
-      firstDate: DateTime(2020),
+      initialDate: _selectedDeadline,
+      firstDate: DateTime(2000),
       lastDate: DateTime(2100),
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(primary: kBlue),
-        ),
-        child: child!,
-      ),
     );
+    if (pickedDate == null) return;
 
-    if (picked == null) return;
+    if (!mounted) return;
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_selectedDeadline),
+    );
+    if (pickedTime == null) return;
+
     setState(() {
-      _deadline = DateTime(
-        picked.year,
-        picked.month,
-        picked.day,
-        _deadline.hour,
-        _deadline.minute,
+      _selectedDeadline = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
       );
     });
   }
 
-  Future<void> _pickTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_deadline),
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(primary: kBlue),
-        ),
-        child: child!,
-      ),
-    );
-
-    if (picked == null) return;
-    setState(() {
-      _deadline = DateTime(
-        _deadline.year,
-        _deadline.month,
-        _deadline.day,
-        picked.hour,
-        picked.minute,
-      );
-    });
+  String _formatDeadlineInput(DateTime dt) {
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year;
+    final hour = dt.hour.toString().padLeft(2, '0');
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year $hour:$minute';
   }
 
   void _submit() {
-    if (!_formKey.currentState!.validate() || _isSaving) return;
+    if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isSaving = true);
     final task = TodoTask(
-      id: widget.task?.id ??
-          DateTime.now().microsecondsSinceEpoch.toString(),
+      id: widget.task?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
       title: _titleController.text.trim(),
       description: _descriptionController.text.trim(),
-      deadline: _deadline,
+      deadline: _selectedDeadline,
       isComplete: widget.task?.isComplete ?? false,
     );
     Navigator.pop(context, task);
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.day.toString().padLeft(2, '0')}.'
-        '${date.month.toString().padLeft(2, '0')}.${date.year}';
-  }
-
-  String _formatTime(DateTime date) {
-    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
-    final minute = date.minute.toString().padLeft(2, '0');
-    final period = date.hour >= 12 ? 'PM' : 'AM';
-    return '${hour.toString().padLeft(2, '0')}:$minute $period';
-  }
-
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
         child: Form(
           key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back_ios_new, size: 17),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 30,
-                      minHeight: 34,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _isEditing ? 'Edit Task' : 'Create New Task',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
+              Text(
+                _isEditing ? 'Edit Task' : 'New Task',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: kInk,
+                ),
               ),
-              const SizedBox(height: 18),
-              _fieldLabel('Title'),
+              const SizedBox(height: 16),
+
+              // Title Field
+              _buildLabel('Title'),
               TextFormField(
                 controller: _titleController,
                 autofocus: !_isEditing,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: _inputDecoration('Enter task title'),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Title cannot be empty';
+                decoration: _inputDecoration('Masukkan nama task'),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Nama tidak boleh kosong';
                   }
                   return null;
                 },
               ),
-              const SizedBox(height: 16),
-              _fieldLabel('Due Date & Time'),
-              Row(
-                children: [
-                  Expanded(
-                    child: _pickerField(
-                      icon: Icons.calendar_today_outlined,
-                      value: _formatDate(_deadline),
-                      onTap: _pickDate,
-                    ),
+              const SizedBox(height: 14),
+
+              //Waktu deadline
+              _buildLabel('Deadline / Time'),
+              InkWell(
+                onTap: _pickDateTime,
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration: _inputDecoration('Pilih tanggal & waktu').copyWith(
+                    suffixIcon: const Icon(Icons.calendar_today, size: 20, color: kMuted),
                   ),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: _pickerField(
-                      icon: Icons.access_time,
-                      value: _formatTime(_deadline),
-                      onTap: _pickTime,
-                    ),
+                  child: Text(
+                    _formatDeadlineInput(_selectedDeadline),
+                    style: const TextStyle(fontSize: 14, color: kInk),
                   ),
-                ],
+                ),
               ),
-              const SizedBox(height: 16),
-              _fieldLabel('Description'),
+              const SizedBox(height: 14),
+
+              // Description Field
+              _buildLabel('Description'),
               TextFormField(
                 controller: _descriptionController,
-                minLines: 3,
-                maxLines: 5,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: _inputDecoration('Write task description...'),
+                minLines: 2,
+                maxLines: 4,
+                decoration: _inputDecoration('Tulis deskripsi'),
               ),
               const SizedBox(height: 22),
+
+              // Actions
               Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _submit,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: kBlue,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                      ),
-                      child: Text(_isEditing ? 'Save Changes' : 'Create Task'),
-                    ),
-                  ),
-                  const SizedBox(width: 9),
-                  OutlinedButton(
+                  TextButton(
                     onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: kInk,
-                      side: const BorderSide(color: Color(0xFFB9B8BF)),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 17,
-                        vertical: 13,
-                      ),
+                    child: const Text('Cancel', style: TextStyle(color: kMuted)),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _submit,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: kBlue,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(9),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: const Text('Cancel'),
+                    child: Text(_isEditing ? 'Save' : 'Create'),
                   ),
                 ],
               ),
@@ -999,15 +725,15 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
     );
   }
 
-  Widget _fieldLabel(String label) {
+  Widget _buildLabel(String text) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 7),
+      padding: const EdgeInsets.only(bottom: 4),
       child: Text(
-        label,
+        text,
         style: const TextStyle(
           fontSize: 12,
-          color: kMuted,
           fontWeight: FontWeight.w600,
+          color: kMuted,
         ),
       ),
     );
@@ -1016,48 +742,20 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
   InputDecoration _inputDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFAAA9B0)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 11, vertical: 12),
-      enabledBorder: const UnderlineInputBorder(
-        borderSide: BorderSide(color: Color(0xFFB9B8BF)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      filled: true,
+      fillColor: kPaper,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFD8D7DD)),
       ),
-      focusedBorder: const UnderlineInputBorder(
-        borderSide: BorderSide(color: kBlue, width: 1.5),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFD8D7DD)),
       ),
-      errorStyle: const TextStyle(fontSize: 11),
-    );
-  }
-
-  Widget _pickerField({
-    required IconData icon,
-    required String value,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 12),
-        decoration: BoxDecoration(
-          color: kPaper,
-          border: Border.all(color: const Color(0xFFD8D7DD)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 14, color: kMuted),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-              ),
-            ),
-            const Icon(Icons.keyboard_arrow_down, size: 16),
-          ],
-        ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: kBlue, width: 1.5),
       ),
     );
   }
