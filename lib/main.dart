@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -99,6 +100,7 @@ class _HomePageState extends State<HomePage> {
   TaskFilter _filter = TaskFilter.all;
   String? _expandedTaskId;
   bool _isLoading = true;
+  final Map<String, Timer> _activeTimers = {};
 
   @override
   void initState() {
@@ -128,6 +130,10 @@ class _HomePageState extends State<HomePage> {
         ..addAll(loaded);
       _isLoading = false;
     });
+
+    for (final task in _tasks) {
+      _scheduleForegroundReminder(task);
+    }
   }
 
   Future<void> _saveTasks() async {
@@ -136,6 +142,30 @@ class _HomePageState extends State<HomePage> {
     await prefs.setStringList(kStorageKey, rawTasks);
   }
 
+  void _scheduleForegroundReminder(TodoTask task) {
+    _activeTimers[task.id]?.cancel();
+
+    if (task.isComplete) return;
+
+    final reminderTime = task.deadline.subtract(const Duration(hours: 1)); //modif timernya disini
+    final delay = reminderTime.difference(DateTime.now());
+
+    if (delay.isNegative) return;
+
+    _activeTimers[task.id] = Timer(delay, () {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reminder: "${task.title}" tenggat dalam 1 jam!'),
+          backgroundColor: kBlue,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      _activeTimers.remove(task.id);
+    });
+  }
   List<TodoTask> get _sortedTasks {
     final result = _tasks.where((task) {
       switch (_filter) {
@@ -179,6 +209,7 @@ class _HomePageState extends State<HomePage> {
       _expandedTaskId = null;
     });
     await _saveTasks();
+    _scheduleForegroundReminder(result);
   }
 
   Future<void> _confirmComplete(TodoTask task) async {
@@ -205,6 +236,9 @@ class _HomePageState extends State<HomePage> {
       task.isComplete = true;
       _expandedTaskId = null;
     });
+    //cancel timer ketika task complete
+    _activeTimers[task.id]?.cancel();
+    _activeTimers.remove(task.id);
     await _saveTasks();
   }
 
@@ -235,6 +269,9 @@ class _HomePageState extends State<HomePage> {
       _tasks.removeWhere((item) => item.id == task.id);
       _expandedTaskId = null;
     });
+    //cancel timer ketika task dihapus
+    _activeTimers[task.id]?.cancel();
+    _activeTimers.remove(task.id);
     await _saveTasks();
   }
 
