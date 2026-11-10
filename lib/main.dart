@@ -1,11 +1,57 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+import 'package:url_launcher/url_launcher.dart';
 
-void main() {
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+final StreamController<NotificationResponse> selectNotificationStream =
+    StreamController<NotificationResponse>.broadcast();
+
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse notificationResponse) {}
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  tz.initializeTimeZones();
+  
+  // Mengatur timezone lokal ke Asia/Jakarta agar perhitungan menit presisi
+  try {
+    tz.setLocalLocation(tz.getLocation('Asia/Jakarta'));
+  } catch (_) {}
+
+  await _initNotifications();
   runApp(const ToDoListApp());
+}
+
+Future<void> _initNotifications() async {
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse: (NotificationResponse response) {
+      selectNotificationStream.add(response);
+    },
+    onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
+  );
+
+  final androidImplementation =
+      flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+  await androidImplementation?.requestNotificationsPermission();
+  await androidImplementation?.requestExactAlarmsPermission();
 }
 
 const Color kInk = Color(0xFF19191D);
@@ -17,6 +63,41 @@ const String kStorageKey = 'todo_tasks_v1';
 
 enum TaskFilter { all, inProgress, complete }
 
+class DeveloperCredit {
+  final String name;
+  final String githubUsername;
+  final String? avatarUrl;
+
+  const DeveloperCredit({
+    required this.name,
+    required this.githubUsername,
+    this.avatarUrl,
+  });
+
+  String get profileUrl => 'https://github.com/$githubUsername';
+  String get displayAvatar =>
+      avatarUrl ?? 'https://github.com/$githubUsername.png';
+}
+
+const List<DeveloperCredit> kTeamCredits = [
+  DeveloperCredit(
+    name: 'Ade Azhar Firdaus',
+    githubUsername: 'AdeAzhar',
+  ),
+  DeveloperCredit(
+    name: 'Adri Lorenzo Patiaraja',
+    githubUsername: 'AdriLorenzo99',
+  ),
+  DeveloperCredit(
+    name: 'Dhimas Eka Putra',
+    githubUsername: 'Dhimasekaputraa',
+  ),
+  DeveloperCredit(
+    name: 'Nugraha Bagya',
+    githubUsername: 'Nuggynih',
+  ),
+];
+
 class TodoTask {
   TodoTask({
     required this.id,
@@ -24,6 +105,8 @@ class TodoTask {
     required this.description,
     required this.deadline,
     this.isComplete = false,
+    this.isReminderEnabled = false,
+    this.reminderMinutes = 15,
   });
 
   final String id;
@@ -31,6 +114,8 @@ class TodoTask {
   String description;
   DateTime deadline;
   bool isComplete;
+  bool isReminderEnabled;
+  int reminderMinutes;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -38,6 +123,8 @@ class TodoTask {
         'description': description,
         'deadline': deadline.toIso8601String(),
         'isComplete': isComplete,
+        'isReminderEnabled': isReminderEnabled,
+        'reminderMinutes': reminderMinutes,
       };
 
   factory TodoTask.fromJson(Map<String, dynamic> json) {
@@ -48,6 +135,8 @@ class TodoTask {
       deadline: DateTime.tryParse(json['deadline'] as String? ?? '') ??
           DateTime.now(),
       isComplete: json['isComplete'] as bool? ?? false,
+      isReminderEnabled: json['isReminderEnabled'] as bool? ?? false,
+      reminderMinutes: json['reminderMinutes'] as int? ?? 15,
     );
   }
 }
@@ -58,7 +147,7 @@ class ToDoListApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'To Do List - App',
+      title: 'To Do List',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -68,13 +157,7 @@ class ToDoListApp extends StatelessWidget {
           primary: kBlue,
           surface: Colors.white,
         ),
-        fontFamily: 'Roboto',
-        appBarTheme: const AppBarTheme(
-          backgroundColor: kInk,
-          foregroundColor: Colors.white,
-          centerTitle: true,
-          elevation: 0,
-        ),
+        fontFamily: 'Manrope',
         dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
@@ -99,11 +182,117 @@ class _HomePageState extends State<HomePage> {
   TaskFilter _filter = TaskFilter.all;
   String? _expandedTaskId;
   bool _isLoading = true;
+  StreamSubscription<NotificationResponse>? _notificationSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadTasks();
+    _listenToNotifications();
+  }
+
+  @override
+  void dispose() {
+    _notificationSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _listenToNotifications() {
+    _notificationSubscription =
+        selectNotificationStream.stream.listen((response) {
+      final taskId = response.payload;
+      if (taskId == null) return;
+
+      final taskIndex = _tasks.indexWhere((t) => t.id == taskId);
+      if (taskIndex == -1) return;
+
+      final task = _tasks[taskIndex];
+
+      if (response.actionId == 'mark_complete') {
+        setState(() {
+          task.isComplete = true;
+        });
+        _saveTasks();
+        _cancelNotification(task.id);
+      } else if (response.actionId == 'reschedule' ||
+          response.actionId == null) {
+        _openTaskForm(task: task);
+      }
+    });
+  }
+
+  Future<void> _scheduleNotification(TodoTask task) async {
+    if (!task.isReminderEnabled || task.isComplete) {
+      await _cancelNotification(task.id);
+      return;
+    }
+
+    final reminderTime =
+        task.deadline.subtract(Duration(minutes: task.reminderMinutes));
+
+    if (reminderTime.isBefore(DateTime.now())) {
+      await _cancelNotification(task.id);
+      return;
+    }
+
+    const androidDetails = AndroidNotificationDetails(
+      'todo_reminder_channel',
+      'Task Reminders',
+      channelDescription: 'Notifications for upcoming task deadlines',
+      importance: Importance.max,
+      priority: Priority.high,
+      actions: [
+        AndroidNotificationAction(
+          'mark_complete',
+          'Mark as Complete',
+          showsUserInterface: true,
+        ),
+        AndroidNotificationAction(
+          'reschedule',
+          'Reschedule',
+          showsUserInterface: true,
+        ),
+      ],
+    );
+
+    const notificationDetails = NotificationDetails(android: androidDetails);
+    final scheduledDate = tz.TZDateTime.from(reminderTime, tz.local);
+    final notificationId = task.id.hashCode;
+
+    try {
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        notificationId,
+        'Reminder: ${task.title}',
+        task.description.isNotEmpty
+            ? task.description
+            : 'This task will be due in ${task.reminderMinutes} minutes.',
+        scheduledDate,
+        notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        payload: task.id,
+      );
+    } catch (_) {
+      // Fallback jika Android menolak mode exact alarm
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        notificationId,
+        'Reminder: ${task.title}',
+        task.description.isNotEmpty
+            ? task.description
+            : 'This task will be due in ${task.reminderMinutes} minutes.',
+        scheduledDate,
+        notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        payload: task.id,
+      );
+    }
+  }
+
+  Future<void> _cancelNotification(String taskId) async {
+    await flutterLocalNotificationsPlugin.cancel(taskId.hashCode);
   }
 
   Future<void> _loadTasks() async {
@@ -116,9 +305,7 @@ class _HomePageState extends State<HomePage> {
         loaded.add(
           TodoTask.fromJson(jsonDecode(raw) as Map<String, dynamic>),
         );
-      } catch (_) {
-        // Abaikan data yang tidak dapat dibaca agar aplikasi tetap terbuka.
-      }
+      } catch (_) {}
     }
 
     if (!mounted) return;
@@ -178,7 +365,9 @@ class _HomePageState extends State<HomePage> {
       }
       _expandedTaskId = null;
     });
+
     await _saveTasks();
+    await _scheduleNotification(result);
   }
 
   Future<void> _confirmComplete(TodoTask task) async {
@@ -186,7 +375,7 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Mark task as complete'),
-        content: Text('Tandai "${task.title}" sebagai tugas selesai?'),
+        content: Text('Mark "${task.title}" as complete?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -206,6 +395,7 @@ class _HomePageState extends State<HomePage> {
       _expandedTaskId = null;
     });
     await _saveTasks();
+    await _cancelNotification(task.id);
   }
 
   Future<void> _confirmDelete(TodoTask task) async {
@@ -236,6 +426,18 @@ class _HomePageState extends State<HomePage> {
       _expandedTaskId = null;
     });
     await _saveTasks();
+    await _cancelNotification(task.id);
+  }
+
+  Future<void> _launchGitHubUrl(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch $urlString')),
+        );
+      }
+    }
   }
 
   void _showMenu() {
@@ -243,6 +445,10 @@ class _HomePageState extends State<HomePage> {
       context: context,
       showDragHandle: true,
       backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
@@ -251,24 +457,99 @@ class _HomePageState extends State<HomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'To Do List - App',
+                'To Do List App',
                 style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               const Text(
-                'Atur aktivitas harianmu dengan lebih mudah.',
-                style: TextStyle(color: kMuted),
+                'Make your daily activity count.',
+                style: TextStyle(color: kMuted, fontSize: 13),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
+              const Divider(color: Color(0xFFE8E7EB)),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Tentang aplikasi'),
-                subtitle: const Text('Versi MVP 1.0'),
+                leading: const Icon(Icons.info_outline, color: kInk),
+                title: const Text(
+                  'About App',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text(
+                  'App Version 1.0',
+                  style: TextStyle(fontSize: 11),
+                ),
                 onTap: () => Navigator.pop(context),
               ),
+              const Divider(color: Color(0xFFE8E7EB)),
+              const SizedBox(height: 8),
+              const Text(
+                'Developer Team',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: kInk,
+                ),
+              ),
+              const SizedBox(height: 10),
+              ...kTeamCredits.map((dev) => _buildDeveloperTile(dev)),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeveloperTile(DeveloperCredit dev) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: kPaper,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: kInk, width: 1.0),
+      ),
+      child: ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: ClipOval(
+          child: Container(
+            width: 36,
+            height: 36,
+            color: Colors.white,
+            child: Image.network(
+              dev.displayAvatar,
+              width: 36,
+              height: 36,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return const Center(
+                  child: Icon(Icons.person, color: kInk, size: 20),
+                );
+              },
+              errorBuilder: (context, error, stackTrace) {
+                return const Center(
+                  child: Icon(Icons.person, color: kInk, size: 20),
+                );
+              },
+            ),
+          ),
+        ),
+        title: Text(
+          dev.name,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            color: kInk,
+          ),
+        ),
+        subtitle: Text(
+          '@${dev.githubUsername}',
+          style: const TextStyle(fontSize: 11, color: kMuted),
+        ),
+        trailing: IconButton(
+          tooltip: 'Open GitHub Profile',
+          icon: const Icon(Icons.open_in_new_rounded, size: 20, color: kInk),
+          onPressed: () => _launchGitHubUrl(dev.profileUrl),
         ),
       ),
     );
@@ -295,17 +576,6 @@ class _HomePageState extends State<HomePage> {
     final tasks = _sortedTasks;
 
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Menu',
-          onPressed: _showMenu,
-          icon: const Icon(Icons.menu_rounded, size: 29),
-        ),
-        title: const Text(
-          'To Do List - App',
-          style: TextStyle(fontSize: 21, fontWeight: FontWeight.w500),
-        ),
-      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openTaskForm(),
         backgroundColor: kBlue,
@@ -340,27 +610,37 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildGreeting() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(19, 18, 19, 18),
+      padding: const EdgeInsets.fromLTRB(19, 16, 12, 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
+        border: Border.all(color: kInk, width: 1.0),
       ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'Hello, User',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: kInk,
-            ),
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Hello, User',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: kInk,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Ready for today activity?',
+                style: TextStyle(fontSize: 13, color: kMuted),
+              ),
+            ],
           ),
-          SizedBox(height: 4),
-          Text(
-            'Ready for today activity?',
-            style: TextStyle(fontSize: 13, color: kMuted),
+          IconButton(
+            tooltip: 'Menu',
+            onPressed: _showMenu,
+            icon: const Icon(Icons.menu_rounded, size: 28, color: kInk),
           ),
         ],
       ),
@@ -373,45 +653,48 @@ class _HomePageState extends State<HomePage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: const Color(0xFFE8E7EB)),
+        border: Border.all(color: kInk, width: 1.0),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Today Activity',
+            'Your Progress',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 13),
-          Row(
-            children: [
-              Expanded(
-                child: _statCard(
-                  title: 'Total Task',
-                  count: _tasks.length,
-                  large: true,
-                  color: const Color(0xFFF7F6FA),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _statCard(
+                    title: 'Total Task',
+                    count: _tasks.length,
+                    large: true,
+                    color: Colors.white,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  children: [
-                    _statCard(
-                      title: 'On Progress',
-                      count: _progressCount,
-                      color: const Color(0xFFE9E8EC),
-                    ),
-                    const SizedBox(height: 7),
-                    _statCard(
-                      title: 'Complete',
-                      count: _completedCount,
-                      color: kLime,
-                    ),
-                  ],
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _statCard(
+                        title: 'On Progress',
+                        count: _progressCount,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(height: 7),
+                      _statCard(
+                        title: 'Complete',
+                        count: _completedCount,
+                        color: Colors.white,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -426,25 +709,33 @@ class _HomePageState extends State<HomePage> {
   }) {
     return Container(
       width: double.infinity,
-      constraints: BoxConstraints(minHeight: large ? 91 : 43),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kInk.withValues(alpha: 0.65), width: 0.8),
+        border: Border.all(color: kInk, width: 1.0),
       ),
       child: large
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(title, style: const TextStyle(fontSize: 11)),
-                const SizedBox(height: 15),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: kInk,
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Text(
                   '$count',
                   style: const TextStyle(
                     fontSize: 34,
                     height: 1,
                     fontWeight: FontWeight.w800,
+                    color: kInk,
                   ),
                 ),
               ],
@@ -457,12 +748,13 @@ class _HomePageState extends State<HomePage> {
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
+                    color: kInk,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '$count ${count == 1 ? 'Task' : 'Task'}',
-                  style: const TextStyle(fontSize: 10),
+                  '$count Task',
+                  style: const TextStyle(fontSize: 10, color: kInk),
                 ),
               ],
             ),
@@ -508,7 +800,7 @@ class _HomePageState extends State<HomePage> {
       ),
       backgroundColor: Colors.white,
       selectedColor: kInk,
-      side: BorderSide(color: selected ? kInk : const Color(0xFFB9B8BF)),
+      side: const BorderSide(color: kInk, width: 1.0),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       shape: const StadiumBorder(),
     );
@@ -516,10 +808,13 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildEmptyState() {
     String message = 'You have no task yet';
+    String subtitle = 'Click + button to add new task.';
+
     if (_filter == TaskFilter.inProgress && _tasks.isNotEmpty) {
       message = 'No task in progress';
     } else if (_filter == TaskFilter.complete && _tasks.isNotEmpty) {
       message = 'No completed task yet';
+      subtitle = 'Finish the task you have';
     }
 
     return Padding(
@@ -539,9 +834,9 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 5),
-            const Text(
-              'Tekan tombol + untuk membuat tugas baru.',
-              style: TextStyle(color: kMuted, fontSize: 12),
+            Text(
+              subtitle,
+              style: const TextStyle(color: kMuted, fontSize: 12),
             ),
           ],
         ),
@@ -564,10 +859,14 @@ class _HomePageState extends State<HomePage> {
     for (final entry in groups.entries) {
       widgets.add(
         Padding(
-          padding: const EdgeInsets.only(bottom: 9, top: 2),
+          padding: const EdgeInsets.only(bottom: 9, top: 12),
           child: Text(
             _dateHeading(entry.key),
-            style: const TextStyle(fontSize: 12, color: kMuted),
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: kInk,
+            ),
           ),
         ),
       );
@@ -587,7 +886,7 @@ class _HomePageState extends State<HomePage> {
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kInk.withValues(alpha: 0.72), width: 0.8),
+        border: Border.all(color: kInk, width: 1.0),
       ),
       child: Column(
         children: [
@@ -663,27 +962,34 @@ class _HomePageState extends State<HomePage> {
           if (expanded) ...[
             Divider(height: 1, color: kInk.withValues(alpha: 0.18)),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Wrap(
-                spacing: 7,
-                runSpacing: 7,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _actionButton(
-                    label: 'Edit Task',
-                    icon: Icons.edit_outlined,
-                    onPressed: () => _openTaskForm(task: task),
-                  ),
                   if (!task.isComplete)
-                    _actionButton(
-                      label: 'Mark as complete',
-                      icon: Icons.check_circle_outline,
-                      primary: true,
-                      onPressed: () => _confirmComplete(task),
-                    ),
+                    Row(
+                      children: [
+                        _actionButton(
+                          label: 'Edit Task',
+                          icon: Icons.edit_outlined,
+                          onPressed: () => _openTaskForm(task: task),
+                        ),
+                        const SizedBox(width: 6),
+                        _actionButton(
+                          label: 'Mark as complete',
+                          icon: Icons.check_circle_outline,
+                          primary: true,
+                          onPressed: () => _confirmComplete(task),
+                        ),
+                      ],
+                    )
+                  else
+                    const SizedBox.shrink(),
                   _actionButton(
                     label: 'Delete',
                     icon: Icons.delete_outline,
-                    danger: true,
+                    danger: !task.isComplete,
+                    dark: task.isComplete,
                     onPressed: () => _confirmDelete(task),
                   ),
                 ],
@@ -701,25 +1007,37 @@ class _HomePageState extends State<HomePage> {
     required VoidCallback onPressed,
     bool primary = false,
     bool danger = false,
+    bool dark = false,
   }) {
+    Color fgColor = kInk;
+    Color bgColor = Colors.white;
+    Color borderColor = kInk;
+
+    if (dark) {
+      fgColor = Colors.white;
+      bgColor = kInk;
+      borderColor = kInk;
+    } else if (primary) {
+      fgColor = Colors.white;
+      bgColor = kBlue;
+      borderColor = kBlue;
+    } else if (danger) {
+      fgColor = const Color(0xFFD7473D);
+      bgColor = Colors.white;
+      borderColor = const Color(0xFFD7473D);
+    }
+
     return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 10)),
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+      ),
       style: OutlinedButton.styleFrom(
-        foregroundColor: primary
-            ? Colors.white
-            : danger
-                ? const Color(0xFFD7473D)
-                : kInk,
-        backgroundColor: primary ? kBlue : Colors.white,
-        side: BorderSide(
-          color: primary
-              ? kBlue
-              : danger
-                  ? const Color(0xFFD7473D)
-                  : const Color(0xFFB9B8BF),
-        ),
+        foregroundColor: fgColor,
+        backgroundColor: bgColor,
+        side: BorderSide(color: borderColor, width: 1.0),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         visualDensity: VisualDensity.compact,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -741,7 +1059,9 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
   late final TextEditingController _descriptionController;
+  late final TextEditingController _reminderMinutesController;
   late DateTime _deadline;
+  late bool _isReminderEnabled;
   bool _isSaving = false;
 
   bool get _isEditing => widget.task != null;
@@ -753,13 +1073,18 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
     _titleController = TextEditingController(text: task?.title ?? '');
     _descriptionController =
         TextEditingController(text: task?.description ?? '');
-    _deadline = task?.deadline ?? DateTime.now().add(const Duration(hours: 1));
+    _deadline = task?.deadline ?? DateTime.now().add(const Duration(minutes: 15));
+    _isReminderEnabled = task?.isReminderEnabled ?? false;
+    _reminderMinutesController = TextEditingController(
+      text: (task?.reminderMinutes ?? 15).toString(),
+    );
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _reminderMinutesController.dispose();
     super.dispose();
   }
 
@@ -817,6 +1142,8 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
     if (!_formKey.currentState!.validate() || _isSaving) return;
 
     setState(() => _isSaving = true);
+    final minutes = int.tryParse(_reminderMinutesController.text.trim()) ?? 15;
+
     final task = TodoTask(
       id: widget.task?.id ??
           DateTime.now().microsecondsSinceEpoch.toString(),
@@ -824,6 +1151,8 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
       description: _descriptionController.text.trim(),
       deadline: _deadline,
       isComplete: widget.task?.isComplete ?? false,
+      isReminderEnabled: _isReminderEnabled,
+      reminderMinutes: minutes,
     );
     Navigator.pop(context, task);
   }
@@ -912,6 +1241,51 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                 ],
               ),
               const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Set Reminder',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: kInk,
+                    ),
+                  ),
+                  Switch(
+                    value: _isReminderEnabled,
+                    activeColor: kBlue,
+                    onChanged: (val) {
+                      setState(() {
+                        _isReminderEnabled = val;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              if (_isReminderEnabled) ...[
+                const SizedBox(height: 8),
+                _fieldLabel('Remind me before (minutes)'),
+                TextFormField(
+                  controller: _reminderMinutesController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration:
+                      _inputDecoration('Enter minutes (e.g., 15)'),
+                  validator: (value) {
+                    if (!_isReminderEnabled) return null;
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter minutes';
+                    }
+                    final num = int.tryParse(value.trim());
+                    if (num == null || num <= 0) {
+                      return 'Enter a valid number greater than 0';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+              const SizedBox(height: 16),
               _fieldLabel('Description'),
               TextFormField(
                 controller: _descriptionController,
@@ -942,7 +1316,7 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                     onPressed: () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: kInk,
-                      side: const BorderSide(color: Color(0xFFB9B8BF)),
+                      side: const BorderSide(color: kInk),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 17,
                         vertical: 13,
